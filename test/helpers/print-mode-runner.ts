@@ -41,7 +41,7 @@
  * what you register in `beforeRun` and which `subagent_type` the `Agent` call
  * names. See `test/subagents-print-mode-e2e.test.ts` for usage.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -335,6 +335,23 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   }
 
   // --- build the parent host session with the extension loaded ---
+  // A real session starts with subagents off (the `/agents on|off` master
+  // switch). These tests exercise subagents, so seed the switch on unless the
+  // test already asked for a different start state in its own settings file.
+  const seededSettings = join(cwd, ".pi", "subagents.json");
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  let seeded: Record<string, unknown> = {};
+  if (existsSync(seededSettings)) {
+    try {
+      seeded = JSON.parse(readFileSync(seededSettings, "utf-8")) as Record<string, unknown>;
+    } catch {
+      seeded = {};
+    }
+  }
+  if (seeded.subagentsEnabled === undefined) {
+    writeFileSync(seededSettings, JSON.stringify({ ...seeded, subagentsEnabled: true }));
+  }
+
   // Resolved after globals are isolated, so it honors the hermetic dir.
   const agentDir = getAgentDir();
   const loader = new DefaultResourceLoader({

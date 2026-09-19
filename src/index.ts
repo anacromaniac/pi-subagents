@@ -793,6 +793,12 @@ export default function (pi: ExtensionAPI) {
       fleet.setUICtx(ctx.ui as any);
     }
     manager.clearCompleted(true);
+    // Fresh session: subagents start disabled (see the master switch above).
+    // Idempotent and cheap — re-applies the tool gate and the footer status on
+    // every session_start, so a resumed or replaced session lands on the same
+    // state a new one does.
+    subagentsEnabled = subagentsStartEnabled;
+    applySubagentGate();
     // Guard mirrors the `!scheduler.isActive()` pattern below: session_start
     // fires once per activation, but a double-bind must not leak listeners.
     if (!rpcHandle) {
@@ -1100,6 +1106,7 @@ export default function (pi: ExtensionAPI) {
     rpcHandle?.unsubPing();
     rpcHandle?.unsubConsume();
     rpcHandle = undefined;
+    if (currentCtx?.hasUI) currentCtx.ui.setStatus("subagents", undefined);
     currentCtx = undefined;
     // Only release the global slot if this activation claimed it — a child
     // session's shutdown must not delete the root session's registry entry.
@@ -1145,13 +1152,32 @@ export default function (pi: ExtensionAPI) {
   // `input` hook and the stacked autocomplete provider, so the toggle applies
   // immediately — the provider itself can never be unregistered (pi's wrapper
   // list is append-only), it just delegates everything when this is off.
+  // ---- Master switch: subagents on/off ----
+  // Session-scoped and OFF by default: a fresh session starts with the subagent
+  // tools withdrawn from the active set, so the model is never told they exist
+  // and their specs cost no system-prompt tokens until asked for. `/agents on`
+  // brings them back in the same session, `/agents off` takes them away and
+  // stops everything in flight. Deliberately not persisted — the next session
+  // starts disabled again, which is the point (a quiet default, opt in per use).
+  // Runtime switch. Starts `true` so an extension that has not seen
+  // `session_start` yet behaves as it always has — pi fires session_start before
+  // any turn, so a real session still lands on the configured start state below.
+  let subagentsEnabled = true;
+  // The persisted answer for what a session starts as (`subagentsEnabled` in
+  // subagents.json, default false). Read at session_start; `/agents on|off`
+  // changes only the runtime switch above, so a session toggle never rewrites it.
+  let subagentsStartEnabled = false;
+  function setSubagentsStartEnabled(b: boolean): void { subagentsStartEnabled = b; }
+
   let agentMentionMode: AgentMentionMode = "model";
   function getAgentMentionMode(): AgentMentionMode { return agentMentionMode; }
   function setAgentMentionMode(mode: AgentMentionMode): void { agentMentionMode = mode; }
   // `model` and `direct` differ only in who starts a not-yet-running agent, so
   // everything that just asks "are mentions live at all" — the suggestion list,
-  // the steer and resume branches — reads this instead of the mode.
-  function isAgentMentionsEnabled(): boolean { return agentMentionMode !== "off"; }
+  // the steer and resume branches — reads this instead of the mode. The master
+  // switch gates all of it: with subagents off, a `@handle` is ordinary prose,
+  // not a second door into spawning.
+  function isAgentMentionsEnabled(): boolean { return subagentsEnabled && agentMentionMode !== "off"; }
 
   // Project/global default for writing the subagent .output transcript lives in
   // output-file.ts (both spawn paths read it). A custom agent's
@@ -1409,6 +1435,7 @@ export default function (pi: ExtensionAPI) {
       setDefaultJoinMode,
       setBackgroundByDefault,
       setSchedulingEnabled,
+      setSubagentsEnabled: setSubagentsStartEnabled,
       setScopeModels: setScopeModelsEnabled,
       setStrictAgentFiles: (b) => { strictAgentFiles = b; },
       setDisableDefaultAgents: setDisableDefaultAgents,
@@ -3447,6 +3474,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
       defaultJoinMode: getDefaultJoinMode(),
       backgroundByDefault: getBackgroundByDefault(),
       schedulingEnabled: isSchedulingEnabled(),
+      subagentsEnabled: subagentsStartEnabled,
       scopeModels: isScopeModelsEnabled(),
       strictAgentFiles,
       disableDefaultAgents: isDefaultsDisabled(),
@@ -3965,9 +3993,117 @@ Write the file using the write tool. Only write the file, nothing else.`;
     ctx.ui.notify(message, level);
   }
 
+  /**
+   * Names this extension contributes that the master switch governs. `Workflow`
+   * joins only while the workflow feature is on: a feature disabled by setting,
+   * or withdrawn as a collision, must not be resurrected by `/agents on`.
+   */
+  function governedToolNames(): string[] {
+    const names: string[] = [SUBAGENT_TOOL_NAMES.AGENT, SUBAGENT_TOOL_NAMES.GET_RESULT, SUBAGENT_TOOL_NAMES.STEER];
+    if (isWorkflowsEnabled()) names.push(SUBAGENT_TOOL_NAMES.WORKFLOW);
+    return names;
+  }
+
+  /**
+   * Push the master switch into pi's active tool set.
+   *
+   * `setActiveTools` is what makes the toggle real rather than cosmetic: pi
+   * rebuilds the system prompt from the new set, so an off session pays no
+   * context for tool specs it cannot call, and an on session gets them back
+   * without a reload. It replaces the whole set, so the current names are read
+   * first and only the governed ones are added or removed — nothing else's tools
+   * are touched.
+   *
+   * Best-effort and swallowed: `getActiveTools`/`getAllTools`/`setActiveTools`
+   * are unavailable in some hosts (print mode, RPC), and not being able to gate
+   * is not a reason to take the session down.
+   */
+  function applySubagentGate(): void {
+    try {
+      const active = pi.getActiveTools();
+      const next = new Set(active);
+      if (subagentsEnabled) {
+        const registered = new Set(pi.getAllTools().map(t => t.name));
+        for (const name of governedToolNames()) {
+          if (registered.has(name)) next.add(name);
+        }
+      } else {
+        for (const name of governedToolNames()) next.delete(name);
+      }
+      const list = [...next];
+      // Write only when the set actually changes. A no-op `setActiveTools` is
+      // indistinguishable from a withdrawal to anything watching the active set
+      // — and the workflow-collision path relies on an untouched set meaning
+      // "nothing was withdrawn".
+      if (list.length !== active.length || list.some((name, i) => name !== active[i])) {
+        pi.setActiveTools(list);
+      }
+    } catch {
+      // Hosts without a tool registry: the status line still reports the state.
+    }
+    syncSubagentsStatus();
+  }
+
+  /** Footer label for the master switch, e.g. `Subagents: on`. */
+  function subagentsStatusLabel(): string {
+    return `Subagents: ${subagentsEnabled ? "on" : "off"}`;
+  }
+
+  /**
+   * Write the master switch to the footer status. pi renders every extension
+   * status with the same dynamic separator, so this slots in beside the others
+   * and is cleared on shutdown with the rest.
+   */
+  function syncSubagentsStatus(): void {
+    const ctx = currentCtx;
+    if (!ctx?.hasUI) return;
+    try {
+      ctx.ui.setStatus("subagents", subagentsStatusLabel());
+    } catch {
+      // No status bar in this host.
+    }
+  }
+
+  /**
+   * Flip the master switch. Turning it off is a hard stop, and the abort half
+   * mirrors `session_shutdown` on purpose: from the subagents' point of view
+   * `/agents off` and quitting must mean the same thing. It aborts every running
+   * agent and workflow, drops pending nudges and stops the scheduler, then
+   * withdraws the tools. Turning it on restarts the scheduler if scheduling was
+   * on and re-adds the tools in place — no reload.
+   */
+  function setSubagentsEnabled(enabled: boolean, ctx?: ExtensionCommandContext): void {
+    subagentsEnabled = enabled;
+    if (!enabled) {
+      for (const task of workflowTasks.values()) task.abortController.abort();
+      workflowTasks.clear();
+      manager.abortAll();
+      for (const timer of pendingNudges.values()) clearTimeout(timer);
+      pendingNudges.clear();
+      scheduler.stop();
+    } else if (isSchedulingEnabled() && !scheduler.isActive() && currentCtx) {
+      startScheduler(currentCtx);
+    }
+    applySubagentGate();
+    widget.update();
+    fleet.update();
+    const ui = (ctx ?? currentCtx)?.ui;
+    ui?.notify?.(subagentsStatusLabel(), "info");
+  }
+
   pi.registerCommand("agents", {
-    description: "Manage agents",
-    handler: async (_args, ctx) => { await showAgentsMenu(ctx); },
+    description: "Manage agents (`/agents on|off` toggles subagents for this session)",
+    getArgumentCompletions: (prefix: string) =>
+      ["on", "off"]
+        .filter(value => value.startsWith(prefix))
+        .map(value => ({ value, label: value })),
+    handler: async (args, ctx) => {
+      const arg = (args ?? "").trim().toLowerCase();
+      if (arg === "on") { setSubagentsEnabled(true, ctx); return; }
+      if (arg === "off") { setSubagentsEnabled(false, ctx); return; }
+      if (arg !== "") { ctx.ui.notify(`Usage: /agents [on|off] — got "${args}"`, "warning"); return; }
+      await showAgentsMenu(ctx);
+    },
   });
 
   /**

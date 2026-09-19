@@ -67,6 +67,19 @@ export interface SubagentsSettings {
    */
   schedulingEnabled?: boolean;
   /**
+   * Whether a new session starts with subagents enabled. Defaults to `false`.
+   *
+   * A fresh session loads with the `Agent`, `get_subagent_result` and
+   * `steer_subagent` tools (and `SubagentWorkflow`, when it is on) withdrawn
+   * from the active set, so the model is never told they exist and their specs
+   * cost no system-prompt tokens. `/agents on|off` flips the switch for the
+   * current session only — the toggle is deliberately not written back here, so
+   * the next session starts disabled again. Set this to `true` to start enabled.
+   *
+   * Read at `session_start`, so a change applies to the next session.
+   */
+  subagentsEnabled?: boolean;
+  /**
    * When true, the effective model of each subagent spawn is validated
    * against `enabledModels` from pi's settings — both global
    * (`<agentDir>/settings.json`) and project-local (`<cwd>/.pi/settings.json`),
@@ -315,6 +328,7 @@ export interface SettingsAppliers {
   setDefaultJoinMode: (mode: JoinMode) => void;
   setBackgroundByDefault: (b: boolean) => void;
   setSchedulingEnabled: (b: boolean) => void;
+  setSubagentsEnabled: (b: boolean) => void;
   setScopeModels: (enabled: boolean) => void;
   setStrictAgentFiles: (b: boolean) => void;
   setDisableDefaultAgents: (b: boolean) => void;
@@ -401,6 +415,9 @@ function sanitize(raw: unknown): SubagentsSettings {
   }
   if (typeof r.schedulingEnabled === "boolean") {
     out.schedulingEnabled = r.schedulingEnabled;
+  }
+  if (typeof r.subagentsEnabled === "boolean") {
+    out.subagentsEnabled = r.subagentsEnabled;
   }
   if (typeof r.scopeModels === "boolean") {
     out.scopeModels = r.scopeModels;
@@ -522,6 +539,7 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   if (s.defaultJoinMode) appliers.setDefaultJoinMode(s.defaultJoinMode);
   if (typeof s.backgroundByDefault === "boolean") appliers.setBackgroundByDefault(s.backgroundByDefault);
   if (typeof s.schedulingEnabled === "boolean") appliers.setSchedulingEnabled(s.schedulingEnabled);
+  if (typeof s.subagentsEnabled === "boolean") appliers.setSubagentsEnabled(s.subagentsEnabled);
   if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
   if (typeof s.strictAgentFiles === "boolean") appliers.setStrictAgentFiles(s.strictAgentFiles);
   if (typeof s.disableDefaultAgents === "boolean") appliers.setDisableDefaultAgents(s.disableDefaultAgents);

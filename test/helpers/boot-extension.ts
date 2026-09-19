@@ -124,7 +124,13 @@ export function hermeticDir(opts: {
 
   mkdirSync(join(dir, ".pi"), { recursive: true });
   if (opts.settings) {
-    writeFileSync(join(dir, ".pi", "subagents.json"), JSON.stringify(opts.settings));
+    // Subagents start disabled in a real session (the `/agents on|off` master
+    // switch). These tests drive subagent behavior, so a supplied settings file
+    // seeds the switch on unless the test asks for something else.
+    writeFileSync(
+      join(dir, ".pi", "subagents.json"),
+      JSON.stringify({ subagentsEnabled: true, ...opts.settings }),
+    );
   }
   if (opts.agentFiles) {
     mkdirSync(join(dir, ".pi", "agents"), { recursive: true });
