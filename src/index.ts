@@ -856,6 +856,15 @@ export default function (pi: ExtensionAPI) {
     runWorkflowFlag(ctx);
   });
 
+  // A one-line, always-current note so the model knows whether subagents are
+  // available and how the user flips them, rather than inferring it from tools
+  // that are absent on purpose. Appended at the END of the system prompt: the
+  // text only changes when the switch does, so the prefix stays byte-stable and
+  // prompt caching is unaffected.
+  pi.on("before_agent_start", async event => ({
+    systemPrompt: `${event.systemPrompt}\n\n${subagentsAwarenessLine()}`,
+  }));
+
   /** Agent types `@` can start, in the shape the roster wants. */
   const mentionTypes = (): TypeInfo[] =>
     getAvailableTypes().map(name => ({ name, description: getAgentConfig(name)?.description ?? name }));
@@ -4050,6 +4059,18 @@ Write the file using the write tool. Only write the file, nothing else.`;
   }
 
   /**
+   * One line the model always sees, stating whether subagents are usable and
+   * how to change it — so it answers "can you use subagents?" instead of
+   * inferring it from tools that are silently absent. Kept to a single short
+   * sentence because it rides in the system prompt of every turn.
+   */
+  function subagentsAwarenessLine(): string {
+    return subagentsEnabled
+      ? "Subagents are ON for this session (`Agent`, `get_subagent_result`, `steer_subagent`). The user toggles them with `/agents off`."
+      : "Subagents are OFF for this session. The user toggles them with `/agents on`.";
+  }
+
+  /**
    * Write the master switch to the footer status. pi renders every extension
    * status with the same dynamic separator, so this slots in beside the others
    * and is cleared on shutdown with the rest.
@@ -4058,9 +4079,13 @@ Write the file using the write tool. Only write the file, nothing else.`;
     const ctx = currentCtx;
     if (!ctx?.hasUI) return;
     try {
-      ctx.ui.setStatus("subagents", subagentsStatusLabel());
+      // `muted`, the same grey Gondolin and Web Access use, so the footer's
+      // extension statuses read as one group rather than a bright outlier.
+      const theme = ctx.ui.theme;
+      const label = subagentsStatusLabel();
+      ctx.ui.setStatus("subagents", theme ? theme.fg("muted", label) : label);
     } catch {
-      // No status bar in this host.
+      // No status bar (or no theme) in this host.
     }
   }
 

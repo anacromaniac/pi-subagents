@@ -156,4 +156,31 @@ describe("the subagent master switch", () => {
     expect(c.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Usage"), "warning");
     expect(c.ui.select).not.toHaveBeenCalled();
   });
+
+  it("colors the footer label `muted`, like the neighbouring statuses", async () => {
+    const { lifecycle } = boot();
+    const c = uiCtx();
+    c.ui.theme = { fg: vi.fn((_color: string, text: string) => `<${text}>`) };
+
+    await lifecycle.get("session_start")({ type: "session_start" }, c);
+
+    expect(c.ui.theme.fg).toHaveBeenCalledWith("muted", "Subagents: off");
+    expect(c.ui.setStatus).toHaveBeenCalledWith("subagents", "<Subagents: off>");
+  });
+
+  it("tells the model the state, so it need not infer it from absent tools", async () => {
+    const { lifecycle, command } = boot();
+    const c = uiCtx();
+    await lifecycle.get("session_start")({ type: "session_start" }, c);
+    const hook = lifecycle.get("before_agent_start");
+
+    const off = await hook({ systemPrompt: "SYS" }, c);
+    expect(off.systemPrompt).toContain("Subagents are OFF");
+    // Appended to the caller's prompt, never replacing it.
+    expect(off.systemPrompt.startsWith("SYS")).toBe(true);
+
+    await command.handler("on", c);
+    const on = await hook({ systemPrompt: "SYS" }, c);
+    expect(on.systemPrompt).toContain("Subagents are ON");
+  });
 });
