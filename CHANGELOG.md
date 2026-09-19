@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **The workflow stand-down now recognises a lowercase `workflow` tool** ([#283](https://github.com/tintinweb/pi-subagents/issues/283) — thanks [@zampierilucas](https://github.com/zampierilucas)). The match is exact on purpose, and the set held `Workflow` and `SubagentWorkflow` only, so `@quintinshaw/pi-dynamic-workflows` — which registers lowercase `workflow` — never tripped it: with `workflowsEnabled` unset, both orchestrators reached the model and nothing warned. Adding the third name is the whole fix; exactness is kept, so a `list_workflows` still cannot take the feature down.
+- **The extension now loads from the compiled `./dist/index.js` instead of `./src/index.ts`, removing the per-boot TypeScript transform** ([#252](https://github.com/tintinweb/pi-subagents/issues/252)). Pointing `pi.extensions` at `src/` made pi transpile the whole tree on every session start — the entry pulls in 56 files and their `@sinclair/typebox` dependency, 0.6–1.1 s of the startup budget for code that never changes between runs. `dist/` is gitignored and shipped only in the npm tarball (built by `prepublishOnly`), so a `prepare` script emits it for git installs — falling back to `npx -p typescript tsc --noCheck` because pi installs those with `--omit=dev` and no compiler present. The fallback emits without type-checking; the publish path still runs the full check.
 
 ## [0.19.0] - 2026-08-25
 
