@@ -4079,11 +4079,12 @@ Write the file using the write tool. Only write the file, nothing else.`;
     const ctx = currentCtx;
     if (!ctx?.hasUI) return;
     try {
-      // `muted`, the same grey Gondolin and Web Access use, so the footer's
-      // extension statuses read as one group rather than a bright outlier.
+      // `accent` when on, `muted` grey when off — the same convention Gondolin
+      // and Web Access follow, so the footer's extension statuses read as one
+      // group.
       const theme = ctx.ui.theme;
       const label = subagentsStatusLabel();
-      ctx.ui.setStatus("subagents", theme ? theme.fg("muted", label) : label);
+      ctx.ui.setStatus("subagents", theme ? theme.fg(subagentsEnabled ? "accent" : "muted", label) : label);
     } catch {
       // No status bar (or no theme) in this host.
     }

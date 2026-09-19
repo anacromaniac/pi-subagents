@@ -157,15 +157,18 @@ describe("the subagent master switch", () => {
     expect(c.ui.select).not.toHaveBeenCalled();
   });
 
-  it("colors the footer label `muted`, like the neighbouring statuses", async () => {
-    const { lifecycle } = boot();
+  it("colors the footer label like the neighbouring statuses", async () => {
+    const { lifecycle, command } = boot();
     const c = uiCtx();
     c.ui.theme = { fg: vi.fn((_color: string, text: string) => `<${text}>`) };
 
     await lifecycle.get("session_start")({ type: "session_start" }, c);
-
     expect(c.ui.theme.fg).toHaveBeenCalledWith("muted", "Subagents: off");
     expect(c.ui.setStatus).toHaveBeenCalledWith("subagents", "<Subagents: off>");
+
+    await command.handler("on", c);
+    expect(c.ui.theme.fg).toHaveBeenCalledWith("accent", "Subagents: on");
+    expect(c.ui.setStatus).toHaveBeenCalledWith("subagents", "<Subagents: on>");
   });
 
   it("tells the model the state, so it need not infer it from absent tools", async () => {
