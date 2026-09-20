@@ -4132,6 +4132,16 @@ Write the file using the write tool. Only write the file, nothing else.`;
     },
   });
 
+  // Keyboard twin of `/agents on|off`: same master switch, same hard stop when
+  // turning off. `currentCtx` carries the UI for the notification, so the
+  // handler needs no context argument of its own.
+  pi.registerShortcut(Key.ctrlAlt("s"), {
+    description: "Toggle subagents",
+    handler: () => {
+      setSubagentsEnabled(!subagentsEnabled);
+    },
+  });
+
   /**
    * What `/agents → Workflows` and the fleet list's `workflow` rows need from
    * here. One object, built once: both entry points open the same inspector,
