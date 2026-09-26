@@ -8,6 +8,7 @@
  * footer label and that the no-argument form still opens the menu.
  */
 
+import { Key } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import subagentsExtension from "../src/index.js";
@@ -185,5 +186,25 @@ describe("the subagent master switch", () => {
     await command.handler("on", c);
     const on = await hook({ systemPrompt: "SYS" }, c);
     expect(on.systemPrompt).toContain("Subagents are ON");
+  });
+
+  it("Ctrl+Alt+S is the keyboard twin of `/agents on|off`", async () => {
+    const { lifecycle, shortcuts, pi } = boot();
+    const c = uiCtx();
+    await lifecycle.get("session_start")({ type: "session_start" }, c);
+
+    // One shortcut, bound to the documented key. The handler takes no context
+    // of its own — `currentCtx` carries the UI from the session above.
+    expect([...shortcuts.keys()]).toEqual([Key.ctrlAlt("s")]);
+    const shortcut = [...shortcuts.values()][0];
+
+    shortcut.handler();
+    const active = pi.getActiveTools();
+    for (const name of GOVERNED) expect(active).toContain(name);
+    expect(c.ui.setStatus).toHaveBeenCalledWith("subagents", "Subagents: on");
+
+    shortcut.handler();
+    for (const name of GOVERNED) expect(pi.getActiveTools()).not.toContain(name);
+    expect(c.ui.setStatus).toHaveBeenCalledWith("subagents", "Subagents: off");
   });
 });

@@ -25,6 +25,7 @@ function boot() {
     registerMessageRenderer: vi.fn(),
     registerTool: vi.fn((t: any) => tools.set(t.name, t)),
     registerCommand: vi.fn(),
+    registerShortcut: vi.fn(),
     registerEntryRenderer: vi.fn(),
     registerFlag: vi.fn(),
     getFlag: vi.fn(),
